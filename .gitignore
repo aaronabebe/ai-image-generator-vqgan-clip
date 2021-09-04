@@ -1,0 +1,7 @@
+CLIP/
+taming/ 
+taming-transformers/
+venv/
+.idea/
+vqgan*
+*.png
