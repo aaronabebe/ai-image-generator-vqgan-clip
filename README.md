@@ -22,6 +22,10 @@ pip install -r requirements.txt
 
 ## running 
 
+Currently you have to change the args in `image_generator.py` manually. 
+Simply add a prompt of your liking to try it. 
+First visible results can be seen after ~50 iterations. 
+
 ```python
 python image-generator.py
 ```
@@ -30,4 +34,5 @@ python image-generator.py
 ### TODOs
 
 - [ ] setup docker image
+- [ ] cli interface for entering string
 - [ ] automatically generate gif from progress images
