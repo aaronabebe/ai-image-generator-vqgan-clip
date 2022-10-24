@@ -26,17 +26,16 @@ pip install -r requirements.txt
 
 ## running
 
-Currently you have to change the args in `image_generator.py` manually.
-Simply add a prompt of your liking to try it.
-First visible results can be seen after ~50 iterations.
+Provide a csv file in the given format, same as in `test_instructions.csv`.
+Then run the generation program like this to generate the frames for an animation:
 
-```python
-python
-image - generator.py
+```sh
+python cli.py --instruction_path 'test_instructions.csv'
 ```
 
 ### TODOs
 
 - [ ] setup docker image
 - [ ] cli interface for entering string
+- [x] generate animation frames from csv file
 - [ ] automatically generate gif from progress images

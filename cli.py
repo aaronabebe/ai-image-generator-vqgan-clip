@@ -1,32 +1,44 @@
 import argparse
 import sys
-import time
 
 import torch
-from tqdm import tqdm, trange
 from PIL import Image
+from PIL.Image import Resampling
 from torch import optim
 from torch.nn import functional as F
 from torchvision import transforms
 from torchvision.transforms import functional as TF
+from tqdm import trange, tqdm
 
 from CLIP import clip
 from image_generator import load_vqgan_model, MakeCutouts, fetch, parse_prompt, Prompt, resize_image, vector_quantize, \
     clamp_with_grad
+from instructions import Instructions, InstructionPrompt
 
 
-def main(args: argparse.Namespace):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print('Using device:', device)
+def merge_args(args: argparse.Namespace, instruction_args: argparse.Namespace) -> argparse.Namespace:
+    return argparse.Namespace(**vars(args), **vars(instruction_args))
 
-    model = load_vqgan_model(args.vqgan_config, args.vqgan_checkpoint).to(device)
-    perceptor = clip.load(args.clip_model, jit=False)[0].eval().requires_grad_(False).to(device)
+
+def override_args(args: argparse.Namespace, override_args: argparse.Namespace):
+    [setattr(args, k, v) for k, v in vars(override_args).items() if v is not None]
+
+
+def load_models(args, device):
+    m = load_vqgan_model(args.vqgan_config, args.vqgan_checkpoint).to(device)
+    p = clip.load(args.clip_model, jit=False)[0].eval().requires_grad_(False).to(device)
+    return m, p
+
+
+def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt: InstructionPrompt = None):
+    if instruction_prompt:
+        override_args(args, instruction_prompt.args_override())
 
     cut_size = perceptor.visual.input_resolution
     e_dim = model.quantize.e_dim
-    f = 2 ** (model.decoder.num_resolutions - 1)
     make_cutouts = MakeCutouts(cut_size, args.cutn, cut_pow=args.cut_pow)
     n_toks = model.quantize.n_e
+    f = 2 ** (model.decoder.num_resolutions - 1)
     toksX, toksY = args.size[0] // f, args.size[1] // f
     sideX, sideY = toksX * f, toksY * f
     z_min = model.quantize.embedding.weight.min(dim=0).values[None, :, None, None]
@@ -37,7 +49,7 @@ def main(args: argparse.Namespace):
 
     if args.init_image:
         pil_image = Image.open(fetch(args.init_image)).convert('RGB')
-        pil_image = pil_image.resize((sideX, sideY), Image.LANCZOS)
+        pil_image = pil_image.resize((sideX, sideY), Resampling.LANCZOS)
         z, *_ = model.encode(TF.to_tensor(pil_image).to(device).unsqueeze(0) * 2 - 1)
     else:
         one_hot = F.one_hot(torch.randint(n_toks, [toksY * toksX], device=device), n_toks).float()
@@ -69,78 +81,90 @@ def main(args: argparse.Namespace):
         embed = torch.empty([1, perceptor.visual.output_dim]).normal_(generator=gen)
         pMs.append(Prompt(embed, weight).to(device))
 
-    def synth(z):
-        z_q = vector_quantize(z.movedim(1, 3), model.quantize.embedding.weight).movedim(3, 1)
-        return clamp_with_grad(model.decode(z_q).add(1).div(2), 0, 1)
-
-    @torch.no_grad()
-    def checkin(i, losses):
-        # losses_str = ', '.join(f'{loss.item():g}' for loss in losses)
-        # print(f'i: {i}, loss: {sum(losses).item():g}, losses: {losses_str}', flush=True)
-        out = synth(z)
-        TF.to_pil_image(out[0].cpu()).save(f'example_peter/progress_{i}.png')
-
-    def ascend_txt():
-        out = synth(z)
-        iii = perceptor.encode_image(normalize(make_cutouts(out))).float()
-
-        result = []
-
-        if args.init_weight:
-            result.append(F.mse_loss(z, z_orig) * args.init_weight / 2)
-
-        for prompt in pMs:
-            result.append(prompt(iii))
-
-        return result
-
-    def train(i):
-        opt.zero_grad()
-        lossAll = ascend_txt()
-        if i % args.display_freq == 0:
-            checkin(i, lossAll)
-        loss = sum(lossAll)
-        loss.backward()
-        opt.step()
-        with torch.no_grad():
-            z.copy_(z.maximum(z_min).minimum(z_max))
-
-    try:
+    if instruction_prompt:
+        for i, p in tqdm(instruction_prompt.iter()):
+            print(i, p)
+            train(args, p.save_path(), opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
+    else:
         for i in trange(args.max_iterations):
-            train(i)
-    except KeyboardInterrupt:
-        pass
-    pass
+            train(args, f'example_peter/progress_{i}.png', opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
+
+
+def synth(z: torch.Tensor):
+    z_q = vector_quantize(z.movedim(1, 3), model.quantize.embedding.weight).movedim(3, 1)
+    return clamp_with_grad(model.decode(z_q).add(1).div(2), 0, 1)
+
+
+def ascend_txt(args, pMs, z, z_orig, make_cutouts, normalize):
+    out = synth(z)
+    iii = perceptor.encode_image(normalize(make_cutouts(out))).float()
+
+    result = []
+
+    if args.init_weight:
+        result.append(F.mse_loss(z, z_orig) * args.init_weight / 2)
+
+    for prompt in pMs:
+        result.append(prompt(iii))
+
+    return result
+
+
+@torch.no_grad()
+def checkin(z, save_path, losses):
+    # losses_str = ', '.join(f'{loss.item():g}' for loss in losses)
+    # print(f'i: {i}, loss: {sum(losses).item():g}, losses: {losses_str}', flush=True)
+    out = synth(z)
+    TF.to_pil_image(out[0].cpu()).save(save_path)
+
+
+def train(args, save_path, opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs):
+    opt.zero_grad()
+    lossAll = ascend_txt(args, pMs, z, z_orig, make_cutouts, normalize)
+    checkin(z, save_path, lossAll)
+    loss = sum(lossAll)
+    loss.backward()
+    opt.step()
+    with torch.no_grad():
+        z.copy_(z.maximum(z_min).minimum(z_max))
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-i", "--instruction_path", dest="instruction_path", type=str, required=True,
+        help="Path to the instruction file. Currently only works with .csv files."
+    )
     return parser.parse_args()
 
 
 if __name__ == '__main__':
+    default_args = argparse.Namespace(
+        prompts=['eruption of a mountain forest'],
+        image_prompts=[],
+        noise_prompt_seeds=[],
+        noise_prompt_weights=[],
+        size=[400, 300],
+        init_image=None,
+        init_weight=0.,
+        clip_model='ViT-B/32',
+        vqgan_config='vqgan_imagenet_f16_16384.yaml',
+        vqgan_checkpoint='vqgan_imagenet_f16_16384.ckpt',
+        step_size=0.05,
+        cutn=64,
+        cut_pow=1.,
+        display_freq=1,
+        max_iterations=50,
+        seed=0,
+    )
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print('Using device:', device)
+    model, perceptor = load_models(default_args, device)
+
     if len(sys.argv) < 2:
-        cmd_args = argparse.Namespace(
-            prompts=['eruption of a mountain forest'],
-            image_prompts=[],
-            noise_prompt_seeds=[],
-            noise_prompt_weights=[],
-            size=[400, 300],
-            init_image='example_peter_5/_progress_60.png',
-            init_weight=0.,
-            clip_model='ViT-B/32',
-            vqgan_config='vqgan_imagenet_f16_16384.yaml',
-            vqgan_checkpoint='vqgan_imagenet_f16_16384.ckpt',
-            step_size=0.05,
-            cutn=64,
-            cut_pow=1.,
-            display_freq=1,
-            max_iterations=50,
-            seed=0,
-        )
-        main(cmd_args)
+        main(default_args, model, perceptor, device)
     else:
-        cmd_args = parse_args()
-        # load instructions file
-        # create folder structure
-        # run main with instructions
+        cmd_args = merge_args(default_args, parse_args())
+        instructions = Instructions.from_csv(cmd_args.instruction_path)
+        for prompt in instructions.prompts:
+            main(cmd_args, model, perceptor, device, prompt)
