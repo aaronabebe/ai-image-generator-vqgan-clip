@@ -1,18 +1,22 @@
-# ai-image-generator 
+# ai-image-generator
 
 - Original idea written By Katherine Crowson (https://github.com/crowsonkb,
-https://twitter.com/RiversHaveWings).
+  https://twitter.com/RiversHaveWings).
 - The original BigGAN+CLIP method was by https://twitter.com/advadnoun.
 
+## setup
 
-## setup 
-
-### clone dependencies from git 
+### clone dependencies from git
 
 ```sh
 git clone https://github.com/openai/CLIP
 git clone https://github.com/CompVis/taming-transformers
 ```
+
+### Download model weights
+
+Download the model weights from
+here: [Link to instructions](https://github.com/EleutherAI/vqgan-clip/blob/main/README.md)
 
 ### install pip dependencies
 
@@ -20,16 +24,16 @@ git clone https://github.com/CompVis/taming-transformers
 pip install -r requirements.txt
 ```
 
-## running 
+## running
 
-Currently you have to change the args in `image_generator.py` manually. 
-Simply add a prompt of your liking to try it. 
-First visible results can be seen after ~50 iterations. 
+Currently you have to change the args in `image_generator.py` manually.
+Simply add a prompt of your liking to try it.
+First visible results can be seen after ~50 iterations.
 
 ```python
-python image-generator.py
+python
+image - generator.py
 ```
-
 
 ### TODOs
 

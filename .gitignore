@@ -2,6 +2,10 @@ CLIP/
 taming/ 
 taming-transformers/
 venv/
+__pycache__/
 .idea/
 vqgan*
+*.gif
 *.png
+*.jpg
+*.jpeg
