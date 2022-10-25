@@ -1,6 +1,7 @@
 import argparse
+import glob
 import csv
-import os.path
+import os
 import uuid
 
 
@@ -25,10 +26,10 @@ class InstructionPrompt:
         )
 
     def save_path(self):
-        return f'results/{self.uuid}/{self.current_frame}_progress_{self.prompt.replace(" ", "_")}.png'
+        return f'results/{self.uuid}/{self.current_frame}_{self.prompt.replace(" ", "_")}.png'
 
     def last_path(self):
-        return f'results/{self.uuid}/{self.last_frame}_progress_{self.prompt.replace(" ", "_")}.png'
+        return f'results/{self.uuid}/{self.last_frame}_{self.prompt.replace(" ", "_")}.png'
 
     def __str__(self):
         return f"InstructionPrompt(init_image={self.init_image}, prompt={self.prompt}, first_frame={self.first_frame}, last_frame={self.last_frame})"
@@ -44,32 +45,88 @@ class Instructions:
         os.makedirs(f'results/{self.uuid}', exist_ok=True)
 
     @classmethod
-    def from_csv(cls, path):
+    def from_csv(cls, path, continue_from_id=None):
+        if continue_from_id:
+            instructions = cls(continue_from_id)
+
+            last_file = max(map(os.path.basename, glob.glob(f'results/{continue_from_id}/*.png')),
+                            key=lambda x: int(x.split('_')[0]))
+            last_iteration = int(last_file.split('_')[0])
+
+            run_once = True
+            with open(path, 'r') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if int(row[0]) > last_iteration:
+                        first_frame = int(row[0])
+                        last_frame = int(row[0])
+
+                        if run_once:
+                            instructions.prompts.append(
+                                InstructionPrompt(
+                                    folder_id=continue_from_id,
+                                    init_image=f'results/{continue_from_id}/{str(last_prompt_frame)}_{"_".join(last_file.split("_")[1:])}',
+                                    prompt=last_prompt,
+                                    first_frame=last_prompt_frame,
+                                    last_frame=first_frame - 1
+                                )
+                            )
+                            run_once = False
+
+                        if reached_last_cell(row):
+                            instructions.prompts[-1].last_frame = first_frame
+                            break
+
+                        if instructions.prompts:
+                            instructions.prompts[-1].last_frame = first_frame - 1
+
+                        init_image = get_init_image_path(
+                            instructions=instructions,
+                            row=row,
+                            path_override=f'results/{str(last_prompt_frame)}_{"_".join(last_file.split("_")[1:])}'
+                        )
+
+                        prompt = row[1]
+                        instructions.prompts.append(
+                            InstructionPrompt(continue_from_id, init_image, prompt, first_frame, last_frame))
+                    else:
+                        if len(row) < 2:
+                            continue
+                        last_prompt_frame = row[0]
+                        last_prompt = row[1]
+            return instructions
+
         id = uuid.uuid4()
         instructions = cls(id)
+
         with open(path, 'r') as f:
             reader = csv.reader(f)
-            for i, row in enumerate(reader):
-                first_frame = row[0]
-                last_frame = row[0]
+            for row in reader:
+                first_frame = int(row[0])
+                last_frame = int(row[0])
 
-                if len(row) < 2:
-                    # reached last cell
-                    instructions.prompts[-1].last_frame = int(first_frame)
+                if reached_last_cell(row):
+                    instructions.prompts[-1].last_frame = first_frame
                     break
 
                 if instructions.prompts:
-                    instructions.prompts[-1].last_frame = int(first_frame) - 1
+                    instructions.prompts[-1].last_frame = first_frame - 1
 
-                if len(row) == 3 and os.path.exists(row[2]):
-                    init_image = row[2]
-                else:
-                    if instructions.prompts:
-                        init_image = instructions.prompts[-1].last_path()
-                    else:
-                        init_image = None
-
+                init_image = get_init_image_path(instructions, row)
                 prompt = row[1]
                 instructions.prompts.append(InstructionPrompt(id, init_image, prompt, first_frame, last_frame))
-            print(instructions.prompts)
         return instructions
+
+
+def reached_last_cell(row) -> bool:
+    return len(row) < 2
+
+
+def get_init_image_path(instructions, row, path_override=None) -> str:
+    if len(row) == 3 and os.path.exists(row[2]):
+        return row[2]
+
+    if instructions.prompts:
+        return instructions.prompts[-1].last_path()
+
+    return path_override

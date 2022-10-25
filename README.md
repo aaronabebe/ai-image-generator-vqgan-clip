@@ -33,9 +33,17 @@ Then run the generation program like this to generate the frames for an animatio
 python cli.py --instruction_path 'test_instructions.csv'
 ```
 
-### TODOs
+## TODOs
 
-- [ ] setup docker image
-- [ ] cli interface for entering string
+### feature ideas 
+
+- [x] automatically generate gif from progress images
 - [x] generate animation frames from csv file
-- [ ] automatically generate gif from progress images
+- [x] continue frame generation for folder/csv/framenumber
+- [ ] add some form of automated ai upscaling, e.g. [with opencv](https://learnopencv.com/super-resolution-in-opencv/)
+- [ ] add optional inversion/passe-partout similar to breitband video idea
+- [ ] add functionality to let it run on videos (e.g. get frames/prompts -> run 50 iterations for each frame)
+- [ ] cli interface for entering string
+- [ ] setup docker image
+- [ ] 
+- [ ] 

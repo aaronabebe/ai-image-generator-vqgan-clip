@@ -1,16 +1,21 @@
+import argparse
 import io
 import math
 import sys
 
 sys.path.append('./taming-transformers')
 
+import torch
 from omegaconf import OmegaConf
-from PIL import Image
 import requests
 from taming.models import cond_transformer, vqgan
-import torch
 from torch import nn
+
+from PIL import Image
 from torch.nn import functional as F
+from torchvision.transforms import functional as TF
+
+from CLIP import clip
 
 
 def sinc(x):
@@ -173,3 +178,55 @@ def resize_image(image, out_size):
     size = round((area * ratio) ** 0.5), round((area / ratio) ** 0.5)
     return image.resize(size, Image.LANCZOS)
 
+
+def merge_args(args: argparse.Namespace, instruction_args: argparse.Namespace) -> argparse.Namespace:
+    return argparse.Namespace(**vars(args), **vars(instruction_args))
+
+
+def override_args(args: argparse.Namespace, override_args: argparse.Namespace):
+    [setattr(args, k, v) for k, v in vars(override_args).items() if v is not None]
+
+
+def load_models(args, device):
+    m = load_vqgan_model(args.vqgan_config, args.vqgan_checkpoint).to(device)
+    p = clip.load(args.clip_model, jit=False)[0].eval().requires_grad_(False).to(device)
+    return m, p
+
+
+def synth(model, z: torch.Tensor):
+    z_q = vector_quantize(z.movedim(1, 3), model.quantize.embedding.weight).movedim(3, 1)
+    return clamp_with_grad(model.decode(z_q).add(1).div(2), 0, 1)
+
+
+def ascend_txt(args, model, perceptor, pMs, z, z_orig, make_cutouts, normalize):
+    out = synth(model, z)
+    iii = perceptor.encode_image(normalize(make_cutouts(out))).float()
+
+    result = []
+
+    if args.init_weight:
+        result.append(F.mse_loss(z, z_orig) * args.init_weight / 2)
+
+    for prompt in pMs:
+        result.append(prompt(iii))
+
+    return result
+
+
+@torch.no_grad()
+def checkin(model, z, save_path, losses):
+    # losses_str = ', '.join(f'{loss.item():g}' for loss in losses)
+    # print(f'i: {i}, loss: {sum(losses).item():g}, losses: {losses_str}', flush=True)
+    out = synth(model, z)
+    TF.to_pil_image(out[0].cpu()).save(save_path)
+
+
+def train(args, model, perceptor, save_path, opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs):
+    opt.zero_grad()
+    lossAll = ascend_txt(args, model, perceptor, pMs, z, z_orig, make_cutouts, normalize)
+    checkin(model, z, save_path, lossAll)
+    loss = sum(lossAll)
+    loss.backward()
+    opt.step()
+    with torch.no_grad():
+        z.copy_(z.maximum(z_min).minimum(z_max))

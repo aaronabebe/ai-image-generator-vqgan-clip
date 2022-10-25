@@ -8,26 +8,12 @@ from torch import optim
 from torch.nn import functional as F
 from torchvision import transforms
 from torchvision.transforms import functional as TF
-from tqdm import trange, tqdm
+from tqdm import tqdm, trange
 
 from CLIP import clip
-from image_generator import load_vqgan_model, MakeCutouts, fetch, parse_prompt, Prompt, resize_image, vector_quantize, \
-    clamp_with_grad
-from instructions import Instructions, InstructionPrompt
-
-
-def merge_args(args: argparse.Namespace, instruction_args: argparse.Namespace) -> argparse.Namespace:
-    return argparse.Namespace(**vars(args), **vars(instruction_args))
-
-
-def override_args(args: argparse.Namespace, override_args: argparse.Namespace):
-    [setattr(args, k, v) for k, v in vars(override_args).items() if v is not None]
-
-
-def load_models(args, device):
-    m = load_vqgan_model(args.vqgan_config, args.vqgan_checkpoint).to(device)
-    p = clip.load(args.clip_model, jit=False)[0].eval().requires_grad_(False).to(device)
-    return m, p
+from image_generator import override_args, MakeCutouts, fetch, parse_prompt, Prompt, resize_image, merge_args, \
+    load_models, train
+from instructions import InstructionPrompt, Instructions
 
 
 def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt: InstructionPrompt = None):
@@ -39,6 +25,7 @@ def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt:
     make_cutouts = MakeCutouts(cut_size, args.cutn, cut_pow=args.cut_pow)
     n_toks = model.quantize.n_e
     f = 2 ** (model.decoder.num_resolutions - 1)
+    # TODO how big is f? why does 400 / 300 not work and become 400 / 288?
     toksX, toksY = args.size[0] // f, args.size[1] // f
     sideX, sideY = toksX * f, toksY * f
     z_min = model.quantize.embedding.weight.min(dim=0).values[None, :, None, None]
@@ -83,50 +70,11 @@ def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt:
 
     if instruction_prompt:
         for i, p in tqdm(instruction_prompt.iter()):
-            print(i, p)
-            train(args, p.save_path(), opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
+            train(args, model, perceptor, p.save_path(), opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
     else:
         for i in trange(args.max_iterations):
-            train(args, f'example_peter/progress_{i}.png', opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
-
-
-def synth(z: torch.Tensor):
-    z_q = vector_quantize(z.movedim(1, 3), model.quantize.embedding.weight).movedim(3, 1)
-    return clamp_with_grad(model.decode(z_q).add(1).div(2), 0, 1)
-
-
-def ascend_txt(args, pMs, z, z_orig, make_cutouts, normalize):
-    out = synth(z)
-    iii = perceptor.encode_image(normalize(make_cutouts(out))).float()
-
-    result = []
-
-    if args.init_weight:
-        result.append(F.mse_loss(z, z_orig) * args.init_weight / 2)
-
-    for prompt in pMs:
-        result.append(prompt(iii))
-
-    return result
-
-
-@torch.no_grad()
-def checkin(z, save_path, losses):
-    # losses_str = ', '.join(f'{loss.item():g}' for loss in losses)
-    # print(f'i: {i}, loss: {sum(losses).item():g}, losses: {losses_str}', flush=True)
-    out = synth(z)
-    TF.to_pil_image(out[0].cpu()).save(save_path)
-
-
-def train(args, save_path, opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs):
-    opt.zero_grad()
-    lossAll = ascend_txt(args, pMs, z, z_orig, make_cutouts, normalize)
-    checkin(z, save_path, lossAll)
-    loss = sum(lossAll)
-    loss.backward()
-    opt.step()
-    with torch.no_grad():
-        z.copy_(z.maximum(z_min).minimum(z_max))
+            train(args, model, perceptor, f'example_peter/progress_{i}.png', opt, z, z_min, z_max, z_orig, make_cutouts,
+                  normalize, pMs)
 
 
 def parse_args() -> argparse.Namespace:
@@ -134,6 +82,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-i", "--instruction_path", dest="instruction_path", type=str, required=True,
         help="Path to the instruction file. Currently only works with .csv files."
+    )
+    parser.add_argument(
+        "-c", "--continue_from", dest="continue_from", type=str, required=True,
+        help="Signals the program to continue running from an existing folder with a given UUID."
     )
     return parser.parse_args()
 
@@ -155,7 +107,7 @@ if __name__ == '__main__':
         cut_pow=1.,
         display_freq=1,
         max_iterations=50,
-        seed=0,
+        seed=420,
     )
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Using device:', device)
@@ -165,6 +117,7 @@ if __name__ == '__main__':
         main(default_args, model, perceptor, device)
     else:
         cmd_args = merge_args(default_args, parse_args())
-        instructions = Instructions.from_csv(cmd_args.instruction_path)
+        instructions = Instructions.from_csv(cmd_args.instruction_path, continue_from_id=cmd_args.continue_from)
+        # TODO calc and print estimated time
         for prompt in instructions.prompts:
             main(cmd_args, model, perceptor, device, prompt)
