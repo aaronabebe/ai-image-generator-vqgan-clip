@@ -9,3 +9,5 @@ vqgan*
 *.png
 *.jpg
 *.jpeg
+/taming-transformers/
+/CLIP/

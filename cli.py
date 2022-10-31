@@ -109,7 +109,7 @@ if __name__ == '__main__':
         cut_pow=1.,
         display_freq=1,
         max_iterations=50,
-        seed=69,
+        seed=420,
     )
 
     if not os.path.exists(default_args.vqgan_config):

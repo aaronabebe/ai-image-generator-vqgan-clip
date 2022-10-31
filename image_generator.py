@@ -101,7 +101,7 @@ def checkin(model, z, save_path):
 def train(args, model, perceptor, save_path, opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs):
     opt.zero_grad()
     lossAll = ascend_txt(args, model, perceptor, pMs, z, z_orig, make_cutouts, normalize)
-    checkin(model, z, save_path, lossAll)
+    checkin(model, z, save_path)
     loss = sum(lossAll)
     loss.backward()
     opt.step()
