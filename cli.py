@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 import torch
@@ -11,9 +12,9 @@ from torchvision.transforms import functional as TF
 from tqdm import tqdm, trange
 
 from CLIP import clip
-from image_generator import override_args, MakeCutouts, fetch, parse_prompt, Prompt, resize_image, merge_args, \
-    load_models, train
+from image_generator import override_args, fetch, parse_prompt, resize_image, merge_args, load_models, train
 from instructions import InstructionPrompt, Instructions
+from utils import download_default_vqgan_config, download_default_vqgan_checkpoint, MakeCutouts, Prompt
 
 
 def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt: InstructionPrompt = None):
@@ -69,6 +70,7 @@ def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt:
         pMs.append(Prompt(embed, weight).to(device))
 
     if instruction_prompt:
+        print("Instruction prompt: ", instruction_prompt.prompt)
         for i, p in tqdm(instruction_prompt.iter()):
             train(args, model, perceptor, p.save_path(), opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
     else:
@@ -84,7 +86,7 @@ def parse_args() -> argparse.Namespace:
         help="Path to the instruction file. Currently only works with .csv files."
     )
     parser.add_argument(
-        "-c", "--continue_from", dest="continue_from", type=str, required=True,
+        "-c", "--continue_from", dest="continue_from", type=str, required=False,
         help="Signals the program to continue running from an existing folder with a given UUID."
     )
     return parser.parse_args()
@@ -96,7 +98,7 @@ if __name__ == '__main__':
         image_prompts=[],
         noise_prompt_seeds=[],
         noise_prompt_weights=[],
-        size=[400, 300],
+        size=[384, 288],
         init_image=None,
         init_weight=0.,
         clip_model='ViT-B/32',
@@ -107,8 +109,15 @@ if __name__ == '__main__':
         cut_pow=1.,
         display_freq=1,
         max_iterations=50,
-        seed=420,
+        seed=69,
     )
+
+    if not os.path.exists(default_args.vqgan_config):
+        download_default_vqgan_config()
+
+    if not os.path.exists(default_args.vqgan_checkpoint):
+        download_default_vqgan_checkpoint()
+
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print('Using device:', device)
     model, perceptor = load_models(default_args, device)
@@ -119,5 +128,5 @@ if __name__ == '__main__':
         cmd_args = merge_args(default_args, parse_args())
         instructions = Instructions.from_csv(cmd_args.instruction_path, continue_from_id=cmd_args.continue_from)
         # TODO calc and print estimated time
-        for prompt in instructions.prompts:
+        for prompt in tqdm(instructions.prompts):
             main(cmd_args, model, perceptor, device, prompt)
