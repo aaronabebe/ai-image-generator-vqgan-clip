@@ -26,7 +26,7 @@ class InstructionPrompt:
         )
 
     def save_path(self):
-        return f'results/{self.uuid}/{self.current_frame}_{self.prompt.replace(" ", "_")}.png'
+        return f'results/{self.uuid}/{self.current_frame}_{self.prompt.replace(" ", "_")[:50]}.png'  # 30 chars max to prevent path length issues
 
     def last_path(self):
         return f'results/{self.uuid}/{self.last_frame}_{self.prompt.replace(" ", "_")}.png'
@@ -62,10 +62,12 @@ class Instructions:
                         last_frame = int(row[0])
 
                         if run_once:
+                            run_once_init_image = row[2] if len(
+                                row) > 2 else f'results/{continue_from_id}/{str(last_prompt_frame)}_{"_".join(last_file.split("_")[1:])}'
                             instructions.prompts.append(
                                 InstructionPrompt(
                                     folder_id=continue_from_id,
-                                    init_image=f'results/{continue_from_id}/{str(last_prompt_frame)}_{"_".join(last_file.split("_")[1:])}',
+                                    init_image=run_once_init_image,
                                     prompt=last_prompt,
                                     first_frame=last_prompt_frame,
                                     last_frame=first_frame - 1

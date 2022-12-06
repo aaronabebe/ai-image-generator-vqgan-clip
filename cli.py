@@ -71,7 +71,7 @@ def main(args: argparse.Namespace, model, perceptor, device, instruction_prompt:
 
     if instruction_prompt:
         print("Instruction prompt: ", instruction_prompt.prompt)
-        for i, p in tqdm(instruction_prompt.iter()):
+        for i, p in tqdm(instruction_prompt.iter(), leave=False):
             train(args, model, perceptor, p.save_path(), opt, z, z_min, z_max, z_orig, make_cutouts, normalize, pMs)
     else:
         for i in trange(args.max_iterations):
