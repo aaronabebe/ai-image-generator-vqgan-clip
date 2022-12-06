@@ -26,10 +26,10 @@ class InstructionPrompt:
         )
 
     def save_path(self):
-        return f'results/{self.uuid}/{self.current_frame}_{self.prompt.replace(" ", "_")[:50]}.png'  # 30 chars max to prevent path length issues
+        return f'results/{self.uuid}/{self.current_frame}_{self.prompt.replace(" ", "_")[:50]}.png'  # 50 chars max to prevent path length issues
 
     def last_path(self):
-        return f'results/{self.uuid}/{self.last_frame}_{self.prompt.replace(" ", "_")}.png'
+        return f'results/{self.uuid}/{self.last_frame}_{self.prompt.replace(" ", "_")[:50]}.png'  # 50 chars max to prevent path length issues
 
     def __str__(self):
         return f"InstructionPrompt(init_image={self.init_image}, prompt={self.prompt}, first_frame={self.first_frame}, last_frame={self.last_frame})"
