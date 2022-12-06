@@ -1,6 +1,5 @@
 antlr4-python3-runtime==4.8
 appnope==0.1.2
-async-timeout==3.0.1
 attrs==21.2.0
 backcall==0.2.0
 cachetools==4.2.2
@@ -29,9 +28,8 @@ parso==0.8.2
 pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==9.2.0
-prompt-toolkit==3.0.20
-protobuf==3.17.3
 ptyprocess==0.7.0
+pytorch_lightning
 pyasn1==0.4.8
 pyasn1-modules==0.2.8
 pyDeprecate==0.3.1
